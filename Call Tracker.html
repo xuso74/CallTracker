@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Call Tracker – SaaS</title>
+
+  <!-- ✅ Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+
+<header class="bg-white border-b">
+  <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+    <h1 class="text-xl font-semibold">📞 Call Tracker</h1>
+    <span class="text-sm text-slate-500">Recruitment KPI</span>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-6 py-8 space-y-6">
+
+  <!-- Nueva llamada -->
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <h2 class="text-lg font-medium mb-4">Nueva llamada</h2>
+
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <input id="process" class="border rounded-lg px-4 py-2" placeholder="Proceso (ej. Backend Java – Cliente X)">
+      <input id="name" class="border rounded-lg px-4 py-2" placeholder="Candidato">
+      <input id="date" type="date" class="border rounded-lg px-4 py-2">
+      <input id="duration" type="number" class="border rounded-lg px-4 py-2" placeholder="Min">
+      <button id="addBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2">
+        Añadir
+      </button>
+    </div>
+  </section>
+
+  <!-- Vista semanal -->
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+      <h2 class="text-lg font-medium">Seguimiento semanal</h2>
+
+      <div class="flex items-center gap-2 text-sm">
+        <label>Semana:</label>
+        <select id="weekSelect" class="border rounded px-2 py-1"></select>
+
+        <label class="ml-4">Objetivo:</label>
+        <input id="goal" type="number" value="40" class="w-20 border rounded px-2 py-1">
+      </div>
+    </div>
+
+    <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+      <div id="progressBar" class="bg-emerald-500 h-3 transition-all"></div>
+    </div>
+
+    <p id="summary" class="text-sm text-slate-500 mt-2"></p>
+  </section>
+
+  <!-- Resumen por proceso -->
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <h2 class="text-lg font-medium mb-4">Llamadas por proceso</h2>
+
+    <table class="w-full text-sm">
+      <thead class="text-slate-500 border-b">
+        <tr>
+          <th class="py-2 text-left">Proceso</th>
+          <th class="py-2 text-right">Llamadas</th>
+        </tr>
+      </thead>
+      <tbody id="processStats"></tbody>
+    </table>
+  </section>
+
+  <!-- Listado -->
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <h2 class="text-lg font-medium mb-4">Detalle de llamadas</h2>
+    <ul id="list" class="divide-y text-sm"></ul>
+    <p id="empty" class="text-sm text-slate-400 mt-4"></p>
+  </section>
+
+</main>
+
+<script>
+  const STORAGE_KEY = 'calltracker-saas-procesos';
+  let calls = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  const weekSelect = document.getElementById('weekSelect');
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(calls));
+  }
+
+  function getWeekKey(date) {
+    const d = new Date(date);
+    d.setHours(0,0,0,0);
+    d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+    const week1 = new Date(d.getFullYear(), 0, 4);
+    return d.getFullYear() + '-W' +
+      String(
+        1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7)
+      ).padStart(2,'0');
+  }
+
+  function populateWeeks() {
+    const weeks = [...new Set(calls.map(c => getWeekKey(c.date)))].sort().reverse();
+    const currentWeek = getWeekKey(new Date());
+    if (!weeks.includes(currentWeek)) weeks.unshift(currentWeek);
+
+    weekSelect.innerHTML = '';
+    weeks.forEach(w => {
+      const o = document.createElement('option');
+      o.value = w; o.textContent = w;
+      weekSelect.appendChild(o);
+    });
+    weekSelect.value = currentWeek;
+  }
+
+  function render() {
+    const selectedWeek = weekSelect.value;
+    const goal = Number(document.getElementById('goal').value);
+
+    const weekly = calls.filter(c => getWeekKey(c.date) === selectedWeek);
+    const total = weekly.length;
+    const minutes = weekly.reduce((s,c) => s + c.duration, 0);
+    const progress = goal ? Math.min(100, Math.round((total/goal)*100)) : 0;
+
+    document.getElementById('progressBar').style.width = progress + '%';
+    document.getElementById('summary').textContent =
+      `${total} llamadas · ${minutes} min · ${progress}% del objetivo`;
+
+    // --- Stats por proceso ---
+    const stats = {};
+    weekly.forEach(c => {
+      stats[c.process] = (stats[c.process] || 0) + 1;
+    });
+
+    const tbody = document.getElementById('processStats');
+    tbody.innerHTML = '';
+    Object.entries(stats).forEach(([p,n]) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td class="py-2">${p}</td><td class="py-2 text-right">${n}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    // --- Listado ---
+    const list = document.getElementById('list');
+    const empty = document.getElementById('empty');
+    list.innerHTML = '';
+
+    if (!weekly.length) {
+      empty.textContent = 'No hay llamadas en esta semana.';
+      return;
+    }
+    empty.textContent = '';
+
+    weekly.forEach(c => {
+      const li = document.createElement('li');
+      li.className = 'py-2 flex justify-between';
+      li.innerHTML =
+        `<span>${c.date} · ${c.process} · ${c.name}</span><span>${c.duration} min</span>`;
+      list.appendChild(li);
+    });
+  }
+
+  document.getElementById('addBtn').onclick = () => {
+    const process = document.getElementById('process').value.trim();
+    const name = document.getElementById('name').value.trim();
+    const date = document.getElementById('date').value;
+    const duration = Number(document.getElementById('duration').value);
+
+    if (!process || !name || !date || !duration) return;
+
+    calls.push({ process, name, date, duration });
+    save();
+
+    document.getElementById('process').value = '';
+    document.getElementById('name').value = '';
+    document.getElementById('date').value = '';
+    document.getElementById('duration').value = '';
+
+    populateWeeks();
+    render();
+  };
+
+  weekSelect.onchange = render;
+  document.getElementById('goal').onchange = render;
+
+  populateWeeks();
+  render();
+</script>
+
+</body>
+</html>
